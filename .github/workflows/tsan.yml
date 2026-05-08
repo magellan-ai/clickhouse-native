@@ -1,0 +1,59 @@
+name: TSan nightly
+
+# TSan can't compose with ASan, so it lives in a separate workflow.
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: tsan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tsan:
+    name: TSan ruby-${{ matrix.ruby }}
+    runs-on: ubuntu-24.04
+    # Soft-launched while we triage findings.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ["4.0"]
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.3
+        ports:
+          - 9000:9000
+          - 8123:8123
+        env:
+          CLICKHOUSE_SKIP_USER_SETUP: 1
+        options: >-
+          --health-cmd "wget --spider -q http://localhost:8123/ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 20
+    env:
+      CLICKHOUSE_HOST: localhost
+      CLICKHOUSE_PORT: 9000
+      # TSan doesn't compose with UBSan; no `undefined` here.
+      CFLAGS: "-fsanitize=thread -fno-omit-frame-pointer -O1 -g"
+      CXXFLAGS: "-fsanitize=thread -fno-omit-frame-pointer -O1 -g"
+      LDFLAGS: "-fsanitize=thread"
+      TSAN_OPTIONS: "halt_on_error=1:second_deadlock_stack=1:suppressions=.tsan-suppressions"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Compile extension with TSan
+        run: bundle exec rake compile
+      - name: Run specs under TSan
+        run: |
+          export LD_PRELOAD=$(gcc -print-file-name=libtsan.so)
+          bundle exec rspec --format progress

@@ -584,3 +584,27 @@ RSpec.describe ClickhouseNative::Pool, :clickhouse do
     end
   end
 end
+
+# Exercises the GC-driven cleanup path bypassed by spec_helper's
+# auto-close hook. FD count is the observable; Ruby reclaims wrappers
+# regardless of dfree's behavior, so an ObjectSpace assertion would
+# pass even on a broken dfree.
+RSpec.describe "ClickhouseNative::Client GC finalization", :clickhouse do
+  it "releases native resources when a dropped Client is GC'd" do
+    skip "Requires /proc/self/fd (Linux only)" unless File.directory?("/proc/self/fd")
+    skip "Premise breaks under GC.stress" if GC.stress
+
+    fd_count = -> { Dir.children("/proc/self/fd").size }
+    baseline = fd_count.call
+    20.times { ClickhouseNative::Client.new(**CH_KWARGS) }
+
+    # Witness that sockets actually opened, or the post-GC check is meaningless.
+    expect(fd_count.call - baseline).to be >= 20
+
+    # Forces dfree synchronously; second pass flushes deferred finalizations.
+    GC.start(full_mark: true, immediate_sweep: true)
+    GC.start(full_mark: true, immediate_sweep: true)
+
+    expect(fd_count.call).to be <= baseline
+  end
+end

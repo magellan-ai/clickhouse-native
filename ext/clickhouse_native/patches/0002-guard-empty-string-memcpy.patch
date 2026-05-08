@@ -1,0 +1,21 @@
+diff --git a/clickhouse/columns/string.cpp b/clickhouse/columns/string.cpp
+index dff45ba..e4ba42f 100644
+--- a/clickhouse/columns/string.cpp
++++ b/clickhouse/columns/string.cpp
+@@ -136,7 +136,15 @@ struct ColumnString::Block
+     std::string_view AppendUnsafe(std::string_view str) {
+         const auto pos = &data_[size];
+ 
+-        memcpy(pos, str.data(), str.size());
++        // memcpy with a NULL source pointer is UB even when n == 0
++        // (its arguments are nonnull-attributed). std::string_view's
++        // data() is permitted to return nullptr for an empty view, so
++        // guard the call. UBSan flags this; libc implementations
++        // short-circuit on n == 0 in practice, hence years of working
++        // production code.
++        if (str.size() != 0) {
++            memcpy(pos, str.data(), str.size());
++        }
+         size += str.size();
+ 
+         return std::string_view(pos, str.size());

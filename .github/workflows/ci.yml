@@ -59,6 +59,98 @@ jobs:
       - name: Run specs
         run: bundle exec rspec --format progress
 
+  sanitize:
+    name: ASan+UBSan ruby-${{ matrix.ruby }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ["4.0"]
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.3
+        ports:
+          - 9000:9000
+          - 8123:8123
+        env:
+          CLICKHOUSE_SKIP_USER_SETUP: 1
+        options: >-
+          --health-cmd "wget --spider -q http://localhost:8123/ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 20
+    env:
+      CLICKHOUSE_HOST: localhost
+      CLICKHOUSE_PORT: 9000
+      # clang + clang's libsanitizer (not gcc's).
+      CC: clang
+      CXX: clang++
+      # -O1 for readable line numbers; -fno-omit-frame-pointer for backtraces.
+      CFLAGS: "-fsanitize=address,undefined -fno-omit-frame-pointer -O1 -g"
+      CXXFLAGS: "-fsanitize=address,undefined -fno-omit-frame-pointer -O1 -g"
+      LDFLAGS: "-fsanitize=address,undefined"
+      # LSan off: Ruby's conservative GC produces false positives.
+      ASAN_OPTIONS: "detect_leaks=0:abort_on_error=1:print_stats=1"
+      UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build clang
+      - name: Compile extension with sanitizers
+        run: bundle exec rake compile
+      - name: Run specs under sanitizers
+        # Preload clang's ASan+UBSan runtimes; must match what we built against.
+        run: |
+          export LD_PRELOAD="$(clang -print-file-name=libclang_rt.asan-x86_64.so):$(clang -print-file-name=libclang_rt.ubsan_standalone-x86_64.so)"
+          bundle exec rspec --format progress
+
+  gc-stress:
+    name: GC.stress ruby-${{ matrix.ruby }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ["4.0"]
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.3
+        ports:
+          - 9000:9000
+          - 8123:8123
+        env:
+          CLICKHOUSE_SKIP_USER_SETUP: 1
+        options: >-
+          --health-cmd "wget --spider -q http://localhost:8123/ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 20
+    env:
+      CLICKHOUSE_HOST: localhost
+      CLICKHOUSE_PORT: 9000
+      # spec_helper.rb opts into GC.stress when set, and prints
+      # "[spec_helper] GC.stress = true". No marker line → not active.
+      CLICKHOUSE_NATIVE_GC_STRESS: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Compile extension
+        run: bundle exec rake compile
+      - name: Run specs under GC.stress
+        run: bundle exec rspec --format progress
+
   macos-compile:
     name: macos compile (ruby-${{ matrix.ruby }})
     runs-on: macos-14

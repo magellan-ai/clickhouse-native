@@ -1,0 +1,41 @@
+diff --git a/contrib/lz4/lz4/lz4.c b/contrib/lz4/lz4/lz4.c
+index 82ab490..9c19c71 100644
+--- a/contrib/lz4/lz4/lz4.c
++++ b/contrib/lz4/lz4/lz4.c
+@@ -819,7 +819,12 @@ LZ4_FORCE_INLINE int LZ4_compress_generic(
+ 
+     int const maybe_extMem = (dictDirective == usingExtDict) || (dictDirective == usingDictCtx);
+     U32 const prefixIdxLimit = startIndex - dictSize;   /* used when dictDirective == dictSmall */
+-    const BYTE* const dictEnd = dictionary + dictSize;
++    /* Guard against `dictionary + dictSize` evaluating to `NULL + 0`, which is
++     * UB even though it produces NULL on every real implementation. UBSan's
++     * pointer-overflow check trips on it. Without a loaded dictionary,
++     * `dictionary` is NULL and `dictSize` is 0; preserve the original
++     * "dictEnd == dictionary" semantics in that case. */
++    const BYTE* const dictEnd = dictionary ? dictionary + dictSize : NULL;
+     const BYTE* anchor = (const BYTE*) source;
+     const BYTE* const iend = ip + inputSize;
+     const BYTE* const mflimitPlusOne = iend - MFLIMIT + 1;
+@@ -827,9 +832,9 @@ LZ4_FORCE_INLINE int LZ4_compress_generic(
+ 
+     /* the dictCtx currentOffset is indexed on the start of the dictionary,
+      * while a dictionary in the current context precedes the currentOffset */
+-    const BYTE* dictBase = (dictDirective == usingDictCtx) ?
+-                            dictionary + dictSize - dictCtx->currentOffset :
+-                            dictionary + dictSize - startIndex;
++    /* Same NULL+0 guard as `dictEnd` above — see the comment there. */
++    U32 const dictBaseOffset = (dictDirective == usingDictCtx) ? dictCtx->currentOffset : startIndex;
++    const BYTE* dictBase = dictionary ? dictionary + dictSize - dictBaseOffset : NULL;
+ 
+     BYTE* op = (BYTE*) dest;
+     BYTE* const olimit = op + maxOutputSize;
+@@ -2193,7 +2198,8 @@ int LZ4_setStreamDecode (LZ4_streamDecode_t* LZ4_streamDecode, const char* dicti
+ {
+     LZ4_streamDecode_t_internal* lz4sd = &LZ4_streamDecode->internal_donotuse;
+     lz4sd->prefixSize = (size_t) dictSize;
+-    lz4sd->prefixEnd = (const BYTE*) dictionary + dictSize;
++    /* Same NULL+0 guard as `dictEnd` above — see the comment there. */
++    lz4sd->prefixEnd = dictionary ? (const BYTE*) dictionary + dictSize : NULL;
+     lz4sd->externalDict = NULL;
+     lz4sd->extDictSize  = 0;
+     return 1;

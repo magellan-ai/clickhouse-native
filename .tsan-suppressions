@@ -1,0 +1,9 @@
+# ThreadSanitizer suppressions. Each line: `<rule>:<pattern>`.
+#
+# Ruby's threading internals (GVL, ractor scheduler, waiter lists, signal
+# handling) acquire several internal mutexes in different orders depending
+# on which thread initiates the operation. The locking is correct in
+# practice but TSan's static cycle detection flags it as a potential
+# deadlock. Not a bug in our code. Suppress only patterns we've actually
+# seen, not preemptively.
+deadlock:rb_native_mutex_lock
