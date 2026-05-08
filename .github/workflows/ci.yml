@@ -82,7 +82,7 @@ jobs:
     env:
       CLICKHOUSE_HOST: localhost
       CLICKHOUSE_PORT: 9000
-      # clang + clang's libsanitizer (not gcc's).
+      # clang + clang's libsanitizer (not gcc's). See docs/ci_sanitizers.md.
       CC: clang
       CXX: clang++
       # -O1 for readable line numbers; -fno-omit-frame-pointer for backtraces.

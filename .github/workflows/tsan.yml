@@ -1,6 +1,7 @@
 name: TSan nightly
 
 # TSan can't compose with ASan, so it lives in a separate workflow.
+# See docs/ci_sanitizers.md.
 on:
   schedule:
     - cron: "0 4 * * *"
